@@ -17,9 +17,757 @@
  * - /data/aggregate (Agregações)
  */
 
+ola cloud eu to com poblemas vc pode me ajudar olha 
+// INSERT
+    protected.HandleFunc("/data/insert", handlers.InsertHandler).Methods("POST")
+    protected.HandleFunc("/data/batch-insert", handlers.BatchInsertHandler).Methods("POST")
+
+to tentandofaser um insert mais ta dando ero
+package handlers
+import (
+    "encoding/json"
+    "net/http"
+    "meu-provedor/models"
+    "meu-provedor/services/data_service"
+)
+// ============================================================================
+// INSERT HANDLERS
+// ============================================================================
+// InsertHandler processa requisições de INSERT único
+func InsertHandler(w http.ResponseWriter, r *http.Request) {
+    var req models.InsertRequest
+
+    // Decodificar JSON
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        RespondError(w, "JSON inválido", http.StatusBadRequest)
+        return
+    }
+    // Executar INSERT
+    lastID, err := services.ExecuteInsert(req)
+    if err != nil {
+        RespondError(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    // Retornar resultado
+    RespondSuccess(w, map[string]interface{}{
+        "success": true,
+        "message": "Registro inserido com sucesso",
+        "id":      lastID,
+    })
+}
+// BatchInsertHandler processa requisições de INSERT em lote
+func BatchInsertHandler(w http.ResponseWriter, r *http.Request) {
+    var req models.BatchInsertRequest
+
+    // Decodificar JSON
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        RespondError(w, "JSON inválido", http.StatusBadRequest)
+        return
+    }
+    // Executar BATCH INSERT
+    count, err := services.ExecuteBatchInsert(req)
+    if err != nil {
+        RespondError(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    // Retornar resultado
+    RespondSuccess(w, map[string]interface{}{
+        "success": true,
+        "message": "Registros inseridos com sucesso",
+        "count":   count,
+    })
+}
+package services
+import (
+    "fmt"
+    "strings"
+    "meu-provedor/config"
+    "meu-provedor/engine/query"
+    "meu-provedor/models"
+)
+// ============================================================================
+// INSERT SERVICE
+// ============================================================================
+// ExecuteInsert executa um INSERT único
+func ExecuteInsert(req models.InsertRequest) (int64, error) {
+    // Validar requisição
+    if req.ProjectID <= 0 {
+        return 0, models.ErrInvalidProjectID
+    }
+    if req.InstanceID <= 0 {
+        return 0, models.ErrInvalidInstanceID
+    }
+    if req.Table == "" {
+        return 0, models.ErrTableRequired
+    }
+    if len(req.Data) == 0 {
+        return 0, models.ErrNoDataProvided
+    }
+    // Obter código do projeto
+    projectCode, err := GetProjectCodeByID(req.ProjectID)
+    if err != nil {
+        return 0, err
+    }
+    // Construir nome da tabela
+    table, err := BuildTableName(projectCode, req.Table)
+    if err != nil {
+        return 0, err
+    }
+    // Adicionar id_instancia aos dados
+    req.Data["id_instancia"] = req.InstanceID
+    // Extrair colunas e valores
+    var cols []string
+    var vals []interface{}
+    for col, val := range req.Data {
+        if !query.IsValidColumnName(col) {
+            return 0, fmt.Errorf("%w: %s", models.ErrInvalidColumn, col)
+        }
+        cols = append(cols, col)
+        vals = append(vals, val)
+    }
+    // Criar InsertBuilder
+    builder := query.NewInsert(table, cols)
+    builder.AddRow(vals)
+    // Executar INSERT
+    sqlQuery, args := builder.Build()
+    result, err := config.MasterDB.Exec(sqlQuery, args...)
+    if err != nil {
+        return 0, fmt.Errorf("%w: %s", models.ErrInsertFailed, err.Error())
+    }
+    // Retornar ID inserido
+    lastID, err := result.LastInsertId()
+    if err != nil {
+        return 0, err
+    }
+    return lastID, nil
+}
+// ExecuteBatchInsert executa múltiplos INSERTs em lote
+func ExecuteBatchInsert(req models.BatchInsertRequest) (int, error) {
+    // Validar requisição
+    if err := req.Validate(); err != nil {
+        return 0, err
+    }
+    // Obter código do projeto
+    projectCode, err := GetProjectCodeByID(req.ProjectID)
+    if err != nil {
+        return 0, err
+    }
+    // Construir nome da tabela
+    table, err := BuildTableName(projectCode, req.Table)
+    if err != nil {
+        return 0, err
+    }
+    // Coletar todas as colunas únicas
+    colsMap := make(map[string]bool)
+    for _, row := range req.Data {
+        for k := range row {
+            colsMap[k] = true
+        }
+    }
+    colsMap["id_instancia"] = true // obrigatória
+    // Converter mapa para slice ordenado
+    var cols []string
+    for col := range colsMap {
+        if !query.IsValidColumnName(col) {
+            return 0, fmt.Errorf("%w: %s", models.ErrInvalidColumn, col)
+        }
+        cols = append(cols, col)
+    }
+    // Construir query manualmente (batch insert)
+    placeholders := query.BuildPlaceholders(len(cols))
+    queryStr := fmt.Sprintf("INSERT INTO %s (%s) VALUES ", table, strings.Join(cols, ","))
+    var allValues []interface{}
+    var valuePlaceholders []string
+    for _, row := range req.Data {
+        row["id_instancia"] = req.InstanceID
+
+        var rowValues []interface{}
+        for _, col := range cols {
+            rowValues = append(rowValues, row[col])
+        }
+
+        allValues = append(allValues, rowValues...)
+        valuePlaceholders = append(valuePlaceholders, placeholders)
+    }
+    queryStr += strings.Join(valuePlaceholders, ",")
+    // Executar batch insert
+    _, err = config.MasterDB.Exec(queryStr, allValues...)
+    if err != nil {
+        return 0, fmt.Errorf("%w: %v", models.ErrInsertFailed, err)
+    }
+    return len(req.Data), nil
+}
+
+package query
+import (
+    "fmt"
+    "strings"
+)
+// ============================================================================
+// INSERT BUILDER
+// ============================================================================
+// InsertBuilder constrói queries INSERT
+type InsertBuilder struct {
+    Table   string
+    Columns []string
+    Values  [][]interface{}
+}
+// NewInsert cria um novo InsertBuilder
+func NewInsert(table string, columns []string) *InsertBuilder {
+    return &InsertBuilder{
+        Table:   table,
+        Columns: columns,
+        Values:  [][]interface{}{},
+    }
+}
+// AddRow adiciona uma linha de valores
+func (b *InsertBuilder) AddRow(row []interface{}) *InsertBuilder {
+    b.Values = append(b.Values, row)
+    return b
+}
+// Build gera a query SQL final e retorna valores achatados
+func (b *InsertBuilder) Build() (string, []interface{}) {
+    placeholders := BuildPlaceholders(len(b.Columns))
+
+    var allPlaceholders []string
+    var allValues []interface{}
+    for _, row := range b.Values {
+        allPlaceholders = append(allPlaceholders, placeholders)
+        allValues = append(allValues, row...)
+    }
+    query := fmt.Sprintf(
+        "INSERT INTO %s (%s) VALUES %s",
+        b.Table,
+        strings.Join(b.Columns, ","),
+        strings.Join(allPlaceholders, ","),
+    )
+    return query, allValues
+}
+
+// InsertRequest - Requisição para INSERT único
+type InsertRequest struct {
+    ProjectID  int64                  json:"project_id"
+    InstanceID int64                  json:"id_instancia"
+    Table      string                 json:"table"
+    Data       map[string]interface{} json:"data"
+}
+// BatchInsertRequest - Requisição para INSERT em lote
+type BatchInsertRequest struct {
+    ProjectID  int64                    json:"project_id"
+    InstanceID int64                    json:"id_instancia"
+    Table      string                   json:"table"
+    Data       []map[string]interface{} json:"data"
+}
+
+olha como eu aseso 
+/**
+ * ====================================================
+ * SERVIÇO DATA ENGINE - COMUNICAÇÃO COM GO
+ * ====================================================
+ * 
+ * Este serviço encapsula TODAS as operações de dados
+ * disponíveis no Go Data Engine.
+ * 
+ * Endpoints disponíveis:
+ * - /data/select (Advanced Select)
+ * - /data/join-select (Join Select)
+ * - /data/insert (Insert único)
+ * - /data/batch-insert (Insert em lote)
+ * - /data/update (Update único)
+ * - /data/batch-update (Update em lote)
+ * - /data/delete (Delete hard/soft)
+ * - /data/aggregate (Agregações)
+ */
 import axios from "axios";
 import dotenv from "dotenv";
+dotenv.config();
+const GO_API_URL = process.env.GO_API_URL || "http://localhost:8080";
+const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN;
+/**
+ * Headers padrão para todas as requisições
+ */
+function getHeaders() {
+  return {
+    "Content-Type": "application/json",
+    "X-Internal-Token": INTERNAL_TOKEN,
+  };
+}
+/**
+ * Função base para requisições ao Go
+ */
+async function requestToGo(endpoint, payload) {
+  try {
+    const res = await axios.post${GO_API_URL}${endpoint}, payload, {
+      headers: getHeaders(),
+      timeout: 30000,
+    });
+    return res.data;
+  } catch (err) {
+    console.error(
+      ❌ Erro na requisição para ${endpoint}:,
+      err.response?.data || err.message
+    );
+    throw new Error(err.response?.data || err.message);
+  }
+}
 
+/* ====================================================
+   INSERT - INSERÇÕES
+==================================================== */
+/**
+ * ====================================================
+ * INSERT - Inserção de registro único
+ * ====================================================
+ *
+ * Envia dados para o CORE (Go) inserir um único registro
+ * respeitando o isolamento por projeto e instância.
+ *
+ * Estrutura enviada ao Go:
+ * {
+ *   project_id: number,
+ *   id_instancia: number,
+ *   table: string,
+ *   data: object
+ * }
+ *
+ * Campos obrigatórios:
+ * - project_id
+ * - id_instancia
+ * - table
+ * - data (mínimo 1 campo)
+ *
+ * @param {number} project_id
+ * @param {number} id_instancia
+ * @param {string} table
+ * @param {Object} data
+ *
+ * @returns {Promise<Object>}
+ */
+async function insert(project_id, id_instancia, table, data) {
+  // 🔹 Estrutura padrão da rota INSERT
+  const payload = {
+    project_id: project_id ?? null,
+    id_instancia: id_instancia ?? null,
+    table: table ?? "",
+    data: data ?? {},
+  };
+  // 🔹 Validação mínima no distribuidor
+  if (!payload.project_id)
+    throw new Error("project_id é obrigatório");
+  if (!payload.id_instancia)
+    throw new Error("id_instancia é obrigatório");
+  if (!payload.table)
+    throw new Error("table é obrigatória");
+  if (Object.keys(payload.data).length === 0)
+    throw new Error("data não pode ser vazio");
+  // 🔹 Envia para o CORE
+  return requestToGo("/data/insert", payload);
+}
+/**
+ * ====================================================
+ * BATCH INSERT - Inserção de múltiplos registros
+ * ====================================================
+ *
+ * Envia múltiplos registros para o CORE (Go) inserir
+ * respeitando o isolamento por projeto e instância.
+ *
+ * Estrutura enviada ao Go:
+ * {
+ *   project_id: number,      // ID do projeto
+ *   id_instancia: number,    // ID da instância
+ *   table: string,           // Nome da tabela
+ *   data: Array<object>      // Array de registros
+ * }
+ *
+ * Cada objeto em data será complementado automaticamente
+ * com id_instancia se não estiver presente.
+ *
+ * Estrutura de retorno esperada:
+ * {
+ *   success: boolean,        // true se operação OK
+ *   message: string,         // Mensagem de status
+ *   count: number            // Quantidade de registros inseridos
+ * }
+ *
+ * @param {number} project_id
+ * @param {number} id_instancia
+ * @param {string} table
+ * @param {Object[]} data
+ *
+ * @example
+ * batchInsert(1, 10, "produtos", [
+ *   { nome: "Produto 1", preco: 10.50 },
+ *   { nome: "Produto 2", preco: 20.00 },
+ *   { nome: "Produto 3", preco: 15.75 }
+ * ])
+ *
+ * @returns {Promise<{success: boolean, message: string, count: number}>}
+ */
+async function batchInsert(project_id, id_instancia, table, data) {
+  // 🔹 Estrutura padrão pré-definida
+  const payload = {
+    project_id: project_id ?? null,
+    id_instancia: id_instancia ?? null,
+    table: table ?? "",
+    data: Array.isArray(data) ? data.map(row => ({
+      ...row,
+      id_instancia: row.id_instancia ?? id_instancia // garante id_instancia
+    })) : [],
+  };
+  // 🔹 Validações mínimas
+  if (!payload.project_id)
+    throw new Error("project_id é obrigatório");
+  if (!payload.id_instancia)
+    throw new Error("id_instancia é obrigatório");
+  if (!payload.table)
+    throw new Error("table é obrigatória");
+  if (!Array.isArray(payload.data) || payload.data.length === 0)
+    throw new Error("data (array) não pode ser vazio");
+  // 🔹 Envia para o CORE (Go)
+  return requestToGo("/data/batch-insert", payload);
+}
+
+ainda eu disponibiliso para outra api
+/**
+ * ====================================================
+ * CONTROLLER GO DATA ENGINE
+ * ====================================================
+ */
+import goDataEngineService from "../../services/goDataEngine.service.js";
+/* ----------------------
+   CRUD / OPERAÇÕES
+---------------------- */
+// INSERT único
+export async function insertRecord(req, res) {
+  try {
+    const { project_id, id_instancia, table, data } = req.body;
+    if (!project_id || !id_instancia || !table || !data)
+      return res.status(400).json({ success: false, message: "project_id, id_instancia, table e data são obrigatórios" });
+    const result = await goDataEngineService.insert(project_id, id_instancia, table, data);
+    res.json({ success: true, message: "Registro inserido com sucesso", data: result });
+  } catch (err) {
+    console.error("❌ Erro no insert:", err.message);
+    res.status(500).json({ success: false, message: "Erro ao inserir registro", error: err.message });
+  }
+}
+// Batch Insert
+export async function batchInsert(req, res) {
+  try {
+    const { project_id, id_instancia, table, data } = req.body;
+    if (!project_id || !id_instancia || !table || !Array.isArray(data))
+      return res.status(400).json({ success: false, message: "project_id, id_instancia, table e data (array) são obrigatórios" });
+    const result = await goDataEngineService.batchInsert(project_id, id_instancia, table, data);
+    res.json({ success: true, message: "Batch insert realizado com sucesso", data: result });
+  } catch (err) {
+    console.error("❌ Erro no batchInsert:", err.message);
+    res.status(500).json({ success: false, message: "Erro ao inserir registros em lote", error: err.message });
+  }
+}
+
+consumo final
+
+// services/goData.service.js
+const axios = require("axios");
+const API_URL = process.env.NODE_BACKEND_URL;
+const API_KEY = process.env.NODE_API_KEY; // ou PROJECT_API_KEY se você mudou o .env
+const INSTANCE_ID = process.env.ID_INSTANCIA;
+const PROJECT_ID = process.env.PROJECT_ID; // ✅ ADICIONE ESTA LINHA
+
+const headers = {
+  "Content-Type": "application/json",
+  "x-api-key": API_KEY,
+};
+
+async function callGoEngine(endpoint, payload = {}) {
+  try {
+    const response = await axios.post(
+      `${API_URL}/${endpoint}`,
+      {
+        project_id: PROJECT_ID,
+        id_instancia: INSTANCE_ID,
+        ...payload,
+      },
+      { headers }
+    );
+
+    const result = response.data;
+    return result.data.data
+    // 🔥 NORMALIZAÇÃO GLOBAL DE RETORNO
+
+    // Caso padrão do Go → { success, count, data: [] }
+    // ✅ PADRÃO DO GO: { data: { data: [] } }
+    if (result?.data?.data && Array.isArray(result.data.data)) {
+      return result.data.data;
+    }
+    // Caso já venha array
+    if (Array.isArray(result)) {
+      return result;
+    }
+
+    // Caso venha objeto único
+    if (result && typeof result === "object") {
+      return [result];
+    }
+
+    // Caso inválido
+    return [];
+
+  } catch (err) {
+    const erroReal = err.response?.data || err.message;
+    console.error(`[GoEngine ERROR] ${endpoint}:`, JSON.stringify(erroReal.error[1], null, 2));
+    return []; // 🔥 nunca quebrar quem consome
+  }
+}
+
+
+
+function cleanPayload(payload) {
+  const cleaned = {};
+  for (const key in payload) {
+    const value = payload[key];
+    // remove undefined, mantém null, array ou objeto vazio
+    if (value !== undefined) {
+      cleaned[key] = value;
+    }
+  }
+  return cleaned;
+}
+const insert = async ({ table, data }) =>
+  callGoEngine("insert", { table, data });
+async function criarProfissional(nome, especialidade, img,ativo) {
+    if (!nome || nome.trim() === '') {
+        throw new Error('Nome do profissional é obrigatório');
+    }
+    const data = {
+        nome: nome.trim(),
+        especialidade: especialidade?.trim() || null,
+        img: img || null,
+        ativo
+    }
+    console.log(data)
+    const result = await goData.insert({
+        table: TABLE,
+        data: data
+    });
+    console.log("Erro detalhado:", JSON.stringify(result.error, null, 2));
+
+    return result;
+}
+olha oque eu pasei e oque deu ero 
+{
+  nome: 'coort fino',
+  especialidade: 'ofisial',
+  img: '1768951927113-Gemini_Generated_Image_6d28le6d28le6d28.png',
+  ativo: 1
+}
+[GoEngine ERROR] insert: {
+  "success": false,
+  "message": "Erro ao inserir registro",
+  "error": "[object Object]"
+}
+
+pq n ta fasendo  insert onde ta opoblema como resouver olha a estrutura db que nois ta usando to tentando adisiona
+
+Mostrar mais
+20:59
+Olá! Vejo o problema. Vou te ajudar a resolver esse erro de INSERT. Deixa eu analisar a estrutura toda e identificar onde está o problema.
+
+Problemas Identificados
+1. Erro na chamada axios (Sintaxe)
+No arquivo goDataEngine.service.js, tem um erro de sintaxe na linha:
+
+javascript
+const res = await axios.post`${GO_API_URL}${endpoint}`, payload, {
+Problema: Está usando template literals `` ao invés de parênteses ()
+
+Correção:
+
+javascript
+const res = await axios.post(`${GO_API_URL}${endpoint}`, payload, {
+2. Duplicação de id_instancia
+Você está adicionando id_instancia em dois lugares diferentes, o que pode causar conflito:
+
+No batchInsert do service JavaScript
+No ExecuteInsert do Go
+Correção no goDataEngine.service.js:
+
+javascript
+async function insert(project_id, id_instancia, table, data) {
+  const payload = {
+    project_id: project_id ?? null,
+    id_instancia: id_instancia ?? null,
+    table: table ?? "",
+    data: data ?? {}, // ❌ NÃO adicione id_instancia aqui
+  };
+
+  if (!payload.project_id)
+    throw new Error("project_id é obrigatório");
+  if (!payload.id_instancia)
+    throw new Error("id_instancia é obrigatório");
+  if (!payload.table)
+    throw new Error("table é obrigatória");
+  if (Object.keys(payload.data).length === 0)
+    throw new Error("data não pode ser vazio");
+
+  return requestToGo("/data/insert", payload);
+}
+3. Tratamento de erro no consumo final
+No goData.service.js, você está tentando acessar result.data.data, mas quando há erro, a estrutura é diferente:
+
+javascript
+async function callGoEngine(endpoint, payload = {}) {
+  try {
+    const response = await axios.post(
+      `${API_URL}/${endpoint}`,
+      {
+        project_id: PROJECT_ID,
+        id_instancia: INSTANCE_ID,
+        ...payload,
+      },
+      { headers }
+    );
+
+    const result = response.data;
+
+    // ✅ Se houver erro, retorna diretamente
+    if (!result.success) {
+      console.error(`[GoEngine ERROR] ${endpoint}:`, result);
+      throw new Error(result.message || result.error);
+    }
+
+    // ✅ Retorna os dados
+    return result.data || result;
+
+  } catch (err) {
+    const erroReal = err.response?.data || err.message;
+    console.error(`[GoEngine ERROR] ${endpoint}:`, erroReal);
+    throw err; // 🔥 Propaga o erro ao invés de retornar []
+  }
+}
+4. Log melhorado para debug
+Na sua função criarProfissional, melhore o tratamento:
+
+javascript
+async function criarProfissional(nome, especialidade, img, ativo) {
+    if (!nome || nome.trim() === '') {
+        throw new Error('Nome do profissional é obrigatório');
+    }
+    
+    const data = {
+        nome: nome.trim(),
+        especialidade: especialidade?.trim() || null,
+        img: img || null,
+        ativo
+    };
+    
+    console.log("📤 Enviando para insert:", data);
+    
+    try {
+        const result = await goData.insert({
+            table: TABLE,
+            data: data
+        });
+        
+        console.log("✅ Resultado do insert:", result);
+        return result;
+        
+    } catch (error) {
+        console.error("❌ Erro no insert:", error.message);
+        console.error("❌ Stack:", error.stack);
+        throw error;
+    }
+}
+Arquivo Corrigido Completo
+goDataEngine.service.js (Corrigido)
+Código 
+Checklist de Verificação
+Para garantir que vai funcionar, verifique:
+
+✅ No Go (handlers/data_handlers.go):
+go
+// Adicione log para debug
+func InsertHandler(w http.ResponseWriter, r *http.Request) {
+	var req models.InsertRequest
+	
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("❌ Erro ao decodificar JSON: %v", err)
+		RespondError(w, "JSON inválido", http.StatusBadRequest)
+		return
+	}
+	
+	log.Printf("📥 Dados recebidos: %+v", req)
+	
+	lastID, err := services.ExecuteInsert(req)
+	if err != nil {
+		log.Printf("❌ Erro no ExecuteInsert: %v", err)
+		RespondError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	
+	log.Printf("✅ Insert realizado com sucesso. ID: %d", lastID)
+	
+	RespondSuccess(w, map[string]interface{}{
+		"success": true,
+		"message": "Registro inserido com sucesso",
+		"id":      lastID,
+	})
+}
+✅ Estrutura da tabela no MySQL:
+sql
+-- Certifique-se que a tabela existe e tem estas colunas:
+CREATE TABLE IF NOT EXISTS `SEU_PROJETO_profissionais` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `id_instancia` INT NOT NULL,
+  `nome` VARCHAR(255) NOT NULL,
+  `especialidade` VARCHAR(255) NULL,
+  `img` VARCHAR(500) NULL,
+  `ativo` TINYINT(1) DEFAULT 1,
+  INDEX `idx_instancia` (`id_instancia`)
+);
+✅ Variáveis de ambiente (.env):
+env
+# Node Backend
+NODE_BACKEND_URL=http://localhost:3000/api/godata
+NODE_API_KEY=sua-api-key-aqui
+ID_INSTANCIA=1
+PROJECT_ID=1
+
+# Go Backend
+GO_API_URL=http://localhost:8080
+INTERNAL_TOKEN=seu-token-aqui
+🔍 Como Debugar
+Execute com os logs habilitados:
+
+javascript
+const result = await goData.insert({
+    table: 'profissionais',
+    data: {
+        nome: 'coort fino',
+        especialidade: 'ofisial',
+        img: '1768951927113-Gemini_Generated_Image_6d28le6d28le6d28.png',
+        ativo: 1
+    }
+});
+Você deve ver nos logs:
+
+📤 Payload enviado ao Go: (no Node)
+📥 Dados recebidos: (no Go)
+✅ Insert realizado com sucesso (no Go)
+Se ainda der erro, me mande o log completo que aparece! 🚀
+
+
+
+
+
+
+Claude é uma IA e pode cometer erros. Por favor, verifique as respostas.
+/**
+ * ====================================================
+ * SERVIÇO DATA ENGINE - COMUNICAÇÃO COM GO
+ * ====================================================
+ */
+import axios from "axios";
+import dotenv from "dotenv";
 dotenv.config();
 
 const GO_API_URL = process.env.GO_API_URL || "http://localhost:8080";
@@ -40,17 +788,23 @@ function getHeaders() {
  */
 async function requestToGo(endpoint, payload) {
   try {
+    // ✅ CORREÇÃO: Usar parênteses ao invés de template literals
     const res = await axios.post(`${GO_API_URL}${endpoint}`, payload, {
       headers: getHeaders(),
       timeout: 30000,
     });
+    
     return res.data;
   } catch (err) {
-    console.error(
-      `❌ Erro na requisição para ${endpoint}:`,
-      err.response?.data || err.message
+    const errorDetail = err.response?.data || err.message;
+    console.error(`❌ Erro na requisição para ${endpoint}:`, errorDetail);
+    
+    // ✅ Lança erro com mais contexto
+    throw new Error(
+      typeof errorDetail === 'object' 
+        ? JSON.stringify(errorDetail) 
+        : errorDetail
     );
-    throw new Error(err.response?.data || err.message);
   }
 }
 
@@ -613,4 +1367,5 @@ export default {
   
   // AGGREGATE
   aggregate,
+
 };
