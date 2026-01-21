@@ -9,6 +9,40 @@ import goDataEngineService from "../../services/goDataEngine.service.js";
 /* ----------------------
    CRUD / OPERAÇÕES
 ---------------------- */
+export async function insertRecordDebug(req, res) {
+  try {
+    const { project_id, id_instancia, table, data } = req.body;
+
+    if (!project_id || !id_instancia || !table || !data) {
+      return res.status(400).json({
+        success: false,
+        message: "project_id, id_instancia, table e data são obrigatórios"
+      });
+    }
+
+    const result = await goDataEngineService.insertDebug(
+      project_id,
+      id_instancia,
+      table,
+      data
+    );
+
+    // 🔥 Repassa exatamente o que o Go retornou
+    res.json({
+      success: true,
+      sql: result.sql,
+      args: result.args
+    });
+
+  } catch (err) {
+    console.error("❌ Erro no insert DEBUG:", err.message);
+    res.status(500).json({
+      success: false,
+      message: "Erro ao gerar SQL",
+      error: err.message
+    });
+  }
+}
 
 // INSERT único
 export async function insertRecord(req, res) {
@@ -114,3 +148,4 @@ export async function aggregate(req, res) {
     res.status(500).json({ success: false, message: "Erro ao executar agregação", error: err.message });
   }
 }
+
