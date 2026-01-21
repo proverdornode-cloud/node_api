@@ -10,35 +10,77 @@ import goDataEngineService from "../../services/goDataEngine.service.js";
    CRUD / OPERAÇÕES
 ---------------------- */
 
-// INSERT único
+/**
+ * Controller - INSERT único
+ */
 export async function insertRecord(req, res) {
   try {
-    const { project_id, id_instancia, table, data } = req.body;
-    if (!project_id || !id_instancia || !table || !data)
-      return res.status(400).json({ success: false, message: "project_id, id_instancia, table e data são obrigatórios" });
-
-    const result = await goDataEngineService.insert(project_id, id_instancia, table, data);
-    res.json({ success: true, message: "Registro inserido com sucesso", data: result });
+    const { project_id, id_instancia, table, columns } = req.body;
+    
+    if (!project_id || !id_instancia || !table || !columns) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Campos obrigatórios: project_id, id_instancia, table, columns" 
+      });
+    }
+    
+    const result = await goDataEngineService.insert(project_id, id_instancia, table, columns);
+    
+    res.json({ 
+      success: true, 
+      message: "Registro inserido com sucesso", 
+      data: result 
+    });
+    
   } catch (err) {
     console.error("❌ Erro no insert:", err.message);
-    res.status(500).json({ success: false, message: "Erro ao inserir registro", error: err.message });
+    res.status(500).json({ 
+      success: false, 
+      message: "Erro ao inserir registro", 
+      error: err.message 
+    });
   }
 }
 
-// Batch Insert
+/**
+ * Controller - BATCH INSERT
+ */
 export async function batchInsert(req, res) {
   try {
-    const { project_id, id_instancia, table, data } = req.body;
-    if (!project_id || !id_instancia || !table || !Array.isArray(data))
-      return res.status(400).json({ success: false, message: "project_id, id_instancia, table e data (array) são obrigatórios" });
-
-    const result = await goDataEngineService.batchInsert(project_id, id_instancia, table, data);
-    res.json({ success: true, message: "Batch insert realizado com sucesso", data: result });
+    const { project_id, id_instancia, table, rows } = req.body;
+    
+    if (!project_id || !id_instancia || !table || !rows) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Campos obrigatórios: project_id, id_instancia, table, rows" 
+      });
+    }
+    
+    if (!Array.isArray(rows)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "rows deve ser um array" 
+      });
+    }
+    
+    const result = await goDataEngineService.batchInsert(project_id, id_instancia, table, rows);
+    
+    res.json({ 
+      success: true, 
+      message: "Registros inseridos em lote com sucesso", 
+      data: result 
+    });
+    
   } catch (err) {
     console.error("❌ Erro no batchInsert:", err.message);
-    res.status(500).json({ success: false, message: "Erro ao inserir registros em lote", error: err.message });
+    res.status(500).json({ 
+      success: false, 
+      message: "Erro ao inserir registros em lote", 
+      error: err.message 
+    });
   }
 }
+
 
 // GET / Advanced Select
 export async function advancedSelect(req, res) {
@@ -114,6 +156,7 @@ export async function aggregate(req, res) {
     res.status(500).json({ success: false, message: "Erro ao executar agregação", error: err.message });
   }
 }
+
 
 
 
