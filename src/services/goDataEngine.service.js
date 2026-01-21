@@ -582,24 +582,6 @@ async function aggregate(project_id, id_instancia, table, operation, column = nu
   });
 }
 
-async function insertDebug(project_id, id_instancia, table, data) {
-
-  const payload = {
-    project_id,
-    id_instancia,
-    table,
-    data
-  };
-
-  if (!project_id) throw new Error("project_id é obrigatório");
-  if (!id_instancia) throw new Error("id_instancia é obrigatório");
-  if (!table) throw new Error("table é obrigatória");
-  if (!data || Object.keys(data).length === 0)
-    throw new Error("data não pode ser vazio");
-
-  // 🔥 AQUI MUDA O ENDPOINT
-  return requestToGo("/data/insert-debug", payload);
-}
 
       
 /* ====================================================
@@ -614,7 +596,6 @@ export default {
   // INSERT
   insert,
   batchInsert,
-  insertDebug,
   
   // UPDATE
   update,
@@ -627,6 +608,7 @@ export default {
   aggregate,
 
 };
+
 
 
 
