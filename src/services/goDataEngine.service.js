@@ -36,19 +36,20 @@ function getHeaders() {
  */
 async function requestToGo(endpoint, payload) {
   try {
-    const res = await axios.post${GO_API_URL}${endpoint}, payload, {
+    const res = await axios.post(`${GO_API_URL}${endpoint}`, payload, {
       headers: getHeaders(),
       timeout: 30000,
     });
     return res.data;
   } catch (err) {
     console.error(
-      ❌ Erro na requisição para ${endpoint}:,
+      `❌ Erro na requisição para ${endpoint}:`,
       err.response?.data || err.message
     );
     throw new Error(err.response?.data || err.message);
   }
 }
+
 
 /* ====================================================
    INSERT - INSERÇÕES
@@ -1108,4 +1109,5 @@ export default {
   aggregate,
 
 };
+
 
