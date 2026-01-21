@@ -27,16 +27,28 @@ export async function insertRecordDebug(req, res) {
       data
     );
 
-    // 🔥 Repassa exatamente o que o Go retornou
-    res.json({
+    // ❌ Go retornou erro lógico
+    if (!result.ok) {
+      return res.status(400).json({
+        success: false,
+        stage: result.stage,
+        message: result.error,
+        debug: result.debug
+      });
+    }
+
+    // ✅ Go retornou SQL válido
+    return res.json({
       success: true,
+      stage: result.stage,
       sql: result.sql,
       args: result.args
     });
 
   } catch (err) {
     console.error("❌ Erro no insert DEBUG:", err.message);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
       message: "Erro ao gerar SQL",
       error: err.message
@@ -148,4 +160,5 @@ export async function aggregate(req, res) {
     res.status(500).json({ success: false, message: "Erro ao executar agregação", error: err.message });
   }
 }
+
 
