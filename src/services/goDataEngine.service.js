@@ -228,135 +228,57 @@ async function joinSelect(options) {
 }
 
 
-/* ====================================================
-   INSERT - INSERÇÕES
-==================================================== */
+// ============================================================================
+// INSERT ÚNICO
+// ============================================================================
 
 /**
- * ====================================================
- * INSERT - Inserção de registro único
- * ====================================================
- *
- * Envia dados para o CORE (Go) inserir um único registro
- * respeitando o isolamento por projeto e instância.
- *
- * Estrutura enviada ao Go:
- * {
- *   project_id: number,
- *   id_instancia: number,
- *   table: string,
- *   data: object
- * }
- *
- * Campos obrigatórios:
- * - project_id
- * - id_instancia
- * - table
- * - data (mínimo 1 campo)
- *
+ * Insere um registro único
  * @param {number} project_id
  * @param {number} id_instancia
  * @param {string} table
- * @param {Object} data
- *
+ * @param {Array<{name: string, value: any}>} columns
  * @returns {Promise<Object>}
  */
-async function insert(project_id, id_instancia, table, data) {
-
-  // 🔹 Estrutura padrão da rota INSERT
+async function insert(project_id, id_instancia, table, columns) {
   const payload = {
-    project_id: project_id ?? null,
-    id_instancia: id_instancia ?? null,
-    table: table ?? "",
-    data: data ?? {},
+    project_id,
+    id_instancia,
+    table,
+    columns
   };
-
-  // 🔹 Validação mínima no distribuidor
-  if (!payload.project_id)
-    throw new Error("project_id é obrigatório");
-
-  if (!payload.id_instancia)
-    throw new Error("id_instancia é obrigatório");
-
-  if (!payload.table)
-    throw new Error("table é obrigatória");
-
-  if (Object.keys(payload.data).length === 0)
-    throw new Error("data não pode ser vazio");
-
-  // 🔹 Envia para o CORE
+  
   return requestToGo("/data/insert", payload);
 }
 
+// ============================================================================
+// BATCH INSERT
+// ============================================================================
+
 /**
- * ====================================================
- * BATCH INSERT - Inserção de múltiplos registros
- * ====================================================
- *
- * Envia múltiplos registros para o CORE (Go) inserir
- * respeitando o isolamento por projeto e instância.
- *
- * Estrutura enviada ao Go:
- * {
- *   project_id: number,      // ID do projeto
- *   id_instancia: number,    // ID da instância
- *   table: string,           // Nome da tabela
- *   data: Array<object>      // Array de registros
- * }
- *
- * Cada objeto em `data` será complementado automaticamente
- * com `id_instancia` se não estiver presente.
- *
- * Estrutura de retorno esperada:
- * {
- *   success: boolean,        // true se operação OK
- *   message: string,         // Mensagem de status
- *   count: number            // Quantidade de registros inseridos
- * }
- *
+ * Insere múltiplos registros
  * @param {number} project_id
  * @param {number} id_instancia
  * @param {string} table
- * @param {Object[]} data
- *
- * @example
- * batchInsert(1, 10, "produtos", [
- *   { nome: "Produto 1", preco: 10.50 },
- *   { nome: "Produto 2", preco: 20.00 },
- *   { nome: "Produto 3", preco: 15.75 }
- * ])
- *
- * @returns {Promise<{success: boolean, message: string, count: number}>}
+ * @param {Array<Array<{name: string, value: any}>>} rows
+ * @returns {Promise<Object>}
  */
-async function batchInsert(project_id, id_instancia, table, data) {
-
-  // 🔹 Estrutura padrão pré-definida
+async function batchInsert(project_id, id_instancia, table, rows) {
   const payload = {
-    project_id: project_id ?? null,
-    id_instancia: id_instancia ?? null,
-    table: table ?? "",
-    data: Array.isArray(data) ? data.map(row => ({
-      ...row,
-      id_instancia: row.id_instancia ?? id_instancia // garante id_instancia
-    })) : [],
+    project_id,
+    id_instancia,
+    table,
+    rows
   };
-
-  // 🔹 Validações mínimas
-  if (!payload.project_id)
-    throw new Error("project_id é obrigatório");
-
-  if (!payload.id_instancia)
-    throw new Error("id_instancia é obrigatório");
-
-  if (!payload.table)
-    throw new Error("table é obrigatória");
-
-  if (!Array.isArray(payload.data) || payload.data.length === 0)
-    throw new Error("data (array) não pode ser vazio");
-
-  // 🔹 Envia para o CORE (Go)
+  
   return requestToGo("/data/batch-insert", payload);
 }
+
+// ============================================================================
+// EXPORTS
+// ============================================================================
+
+
 
 /* ====================================================
    UPDATE - ATUALIZAÇÕES
@@ -608,6 +530,7 @@ export default {
   aggregate,
 
 };
+
 
 
 
