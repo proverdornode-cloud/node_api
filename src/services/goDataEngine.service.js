@@ -1,17 +1,32 @@
 /**
  * ====================================================
- * SERVIÇO DATA ENGINE - COMUNICAÇÃO COM GO
+ * DATA ENGINE SERVICE - Comunicação com Go API
  * ====================================================
+ * 
+ * Serviço para interação com o Data Engine (Go).
+ * Encapsula todas as operações CRUD e agregações.
+ * 
+ * Rotas disponíveis:
+ * - POST /data/select - SELECT avançado
+ * - POST /data/join-select - SELECT com múltiplos JOINs
+ * - POST /data/insert - INSERT único
+ * - POST /data/batch-insert - INSERT em lote
+ * - POST /data/update - UPDATE único
+ * - POST /data/batch-update - UPDATE em lote
+ * - POST /data/delete - DELETE (hard/soft)
+ * - POST /data/aggregate - Agregações (COUNT, SUM, AVG, etc)
  */
+
 import axios from "axios";
 import dotenv from "dotenv";
+
 dotenv.config();
 
 const GO_API_URL = process.env.GO_API_URL || "http://localhost:8080";
 const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN;
 
 /**
- * Headers padrão para todas as requisições
+ * Headers padrão para requisições
  */
 function getHeaders() {
   return {
@@ -21,27 +36,22 @@ function getHeaders() {
 }
 
 /**
- * Função base para requisições ao Go
+ * Executa requisição HTTP POST para o Go
+ * @private
  */
 async function requestToGo(endpoint, payload) {
   try {
-    // ✅ CORREÇÃO: Usar parênteses ao invés de template literals
     const res = await axios.post(`${GO_API_URL}${endpoint}`, payload, {
       headers: getHeaders(),
       timeout: 30000,
     });
-    
     return res.data;
   } catch (err) {
-    const errorDetail = err.response?.data || err.message;
-    console.error(`❌ Erro na requisição para ${endpoint}:`, errorDetail);
-    
-    // ✅ Lança erro com mais contexto
-    throw new Error(
-      typeof errorDetail === 'object' 
-        ? JSON.stringify(errorDetail) 
-        : errorDetail
+    console.error(
+      `❌ Erro em ${endpoint}:`,
+      err.response?.data || err.message
     );
+    throw new Error(err.response?.data?.error || err.message);
   }
 }
 
@@ -50,26 +60,32 @@ async function requestToGo(endpoint, payload) {
 ==================================================== */
 
 /**
- * Advanced Select - SELECT com suporte a JOINs, filtros e paginação
+ * SELECT avançado com JOINs, filtros e paginação
  * 
  * @param {Object} options - Configurações da query
- * @param {number} options.project_id - ID do projeto (obrigatório)
- * @param {number} options.id_instancia - ID da instância (obrigatório)
- * @param {string} options.table - Nome da tabela (obrigatório)
- * @param {string} [options.alias] - Alias da tabela
- * @param {string[]} [options.select] - Colunas a selecionar ["id", "nome"]
- * @param {Object[]} [options.joins] - Array de JOINs
- * @param {Object} [options.where] - Filtros simples {status: "ativo"}
- * @param {string} [options.where_raw] - WHERE customizado
- * @param {string} [options.group_by] - GROUP BY
- * @param {string} [options.having] - HAVING
- * @param {string} [options.order_by] - ORDER BY
- * @param {number} [options.limit] - Limite de resultados
- * @param {number} [options.offset] - Offset para paginação
+ * @param {number} options.project_id - ✅ OBRIGATÓRIO - ID do projeto
+ * @param {number} options.id_instancia - ✅ OBRIGATÓRIO - ID da instância
+ * @param {string} options.table - ✅ OBRIGATÓRIO - Nome da tabela (sem prefixo)
+ * @param {string} [options.alias] - ❌ OPCIONAL - Alias da tabela
+ * @param {string[]} [options.select] - ❌ OPCIONAL - Colunas ["id", "nome"] (padrão: *)
+ * @param {Object[]} [options.joins] - ❌ OPCIONAL - Array de JOINs
+ * @param {string} options.joins[].type - Tipo: INNER, LEFT, RIGHT
+ * @param {string} options.joins[].table - Nome da tabela
+ * @param {string} options.joins[].alias - Alias da tabela
+ * @param {string} options.joins[].on - Condição ON
+ * @param {Object} [options.where] - ❌ OPCIONAL - Filtros {coluna: valor}
+ * @param {string} [options.where_raw] - ❌ OPCIONAL - WHERE customizado
+ * @param {string} [options.group_by] - ❌ OPCIONAL - GROUP BY
+ * @param {string} [options.having] - ❌ OPCIONAL - HAVING
+ * @param {string} [options.order_by] - ❌ OPCIONAL - ORDER BY
+ * @param {number} [options.limit] - ❌ OPCIONAL - LIMIT
+ * @param {number} [options.offset] - ❌ OPCIONAL - OFFSET
+ * 
+ * @returns {Promise<{success: boolean, data: Array, count: number}>}
  * 
  * @example
  * // Busca simples
- * advancedSelect({
+ * await advancedSelect({
  *   project_id: 1,
  *   id_instancia: 10,
  *   table: "usuarios",
@@ -77,11 +93,11 @@ async function requestToGo(endpoint, payload) {
  *   where: { status: "ativo" },
  *   order_by: "nome ASC",
  *   limit: 20
- * })
+ * });
  * 
  * @example
  * // Com JOIN
- * advancedSelect({
+ * await advancedSelect({
  *   project_id: 1,
  *   id_instancia: 10,
  *   table: "pedidos",
@@ -95,7 +111,7 @@ async function requestToGo(endpoint, payload) {
  *   }],
  *   where: { "p.status": "aprovado" },
  *   limit: 50
- * })
+ * });
  */
 async function advancedSelect(options) {
   const {
@@ -118,11 +134,10 @@ async function advancedSelect(options) {
     throw new Error("project_id, id_instancia e table são obrigatórios");
   }
 
-  // 🔹 Criar a estrutura completa com valores padrão
   const payload = {
-    project_id: Number(project_id),      // Go espera int64
-    id_instancia: Number(id_instancia),  // Go espera int64
-    table: table,
+    project_id: Number(project_id),
+    id_instancia: Number(id_instancia),
+    table,
     alias: alias || "",
     select: Array.isArray(select) ? select : [],
     joins: Array.isArray(joins) ? joins : [],
@@ -135,30 +150,37 @@ async function advancedSelect(options) {
     offset: offset || 0,
   };
 
-  console.log("📤 Payload enviado para Go /data/select:", JSON.stringify(payload, null, 2));
-
   return requestToGo("/data/select", payload);
 }
 
-
 /**
- * Join Select - SELECT com múltiplos JOINs complexos
+ * SELECT com múltiplos JOINs complexos
  * 
  * @param {Object} options - Configurações
- * @param {number} options.project_id - ID do projeto
- * @param {number} options.id_instancia - ID da instância
- * @param {Object} options.base - Tabela base {table, alias, columns}
- * @param {Object[]} options.joins - Array de JOINs
- * @param {Object} [options.where] - Filtros simples
- * @param {string[]} [options.where_raw] - Array de condições WHERE
- * @param {string} [options.group_by] - GROUP BY
- * @param {string} [options.having] - HAVING
- * @param {string} [options.order_by] - ORDER BY
- * @param {number} [options.limit] - Limite
- * @param {number} [options.offset] - Offset
+ * @param {number} options.project_id - ✅ OBRIGATÓRIO - ID do projeto
+ * @param {number} options.id_instancia - ✅ OBRIGATÓRIO - ID da instância
+ * @param {Object} options.base - ✅ OBRIGATÓRIO - Tabela base
+ * @param {string} options.base.table - Nome da tabela base
+ * @param {string} [options.base.alias] - Alias da tabela base
+ * @param {string[]} [options.base.columns] - Colunas da tabela base
+ * @param {Object[]} [options.joins] - ❌ OPCIONAL - Array de JOINs
+ * @param {string} options.joins[].type - Tipo: INNER, LEFT, RIGHT
+ * @param {string} options.joins[].table - Nome da tabela
+ * @param {string} [options.joins[].alias] - Alias da tabela
+ * @param {string} options.joins[].on - Condição ON
+ * @param {string[]} [options.joins[].columns] - Colunas do JOIN
+ * @param {Object} [options.where] - ❌ OPCIONAL - Filtros simples
+ * @param {string[]} [options.where_raw] - ❌ OPCIONAL - Array de condições WHERE
+ * @param {string} [options.group_by] - ❌ OPCIONAL - GROUP BY
+ * @param {string} [options.having] - ❌ OPCIONAL - HAVING
+ * @param {string} [options.order_by] - ❌ OPCIONAL - ORDER BY
+ * @param {number} [options.limit] - ❌ OPCIONAL - LIMIT
+ * @param {number} [options.offset] - ❌ OPCIONAL - OFFSET
+ * 
+ * @returns {Promise<{success: boolean, data: Array, count: number}>}
  * 
  * @example
- * joinSelect({
+ * await joinSelect({
  *   project_id: 1,
  *   id_instancia: 10,
  *   base: {
@@ -185,30 +207,27 @@ async function advancedSelect(options) {
  *   where: { "p.status": "aprovado" },
  *   where_raw: ["p.total > 100"],
  *   order_by: "p.data_pedido DESC"
- * })
+ * });
  */
 async function joinSelect(options) {
-  // Desestruturação dos parâmetros com valores padrão
   const {
     project_id,
     id_instancia,
     base,
-    joins = [],        // Se não houver joins, usa um array vazio
-    where = {},        // Se não houver onde, usa um objeto vazio
-    where_raw = [],    // Se não houver where_raw, usa um array vazio
-    group_by = "",     // Se não houver group_by, usa uma string vazia
-    having = "",       // Se não houver having, usa uma string vazia
-    order_by = "",     // Se não houver order_by, usa uma string vazia
-    limit = null,      // Se não houver limit, pode ser null
-    offset = null,     // Se não houver offset, pode ser null
+    joins = [],
+    where = {},
+    where_raw = [],
+    group_by = "",
+    having = "",
+    order_by = "",
+    limit = null,
+    offset = null,
   } = options;
 
-  // Checar se os campos obrigatórios estão presentes
   if (!project_id || !id_instancia || !base?.table) {
     throw new Error("project_id, id_instancia e base.table são obrigatórios");
   }
 
-  // Estrutura de configuração final
   const payload = {
     project_id,
     id_instancia,
@@ -223,109 +242,144 @@ async function joinSelect(options) {
     offset,
   };
 
-  // Chama a requisição para o back-end
   return requestToGo("/data/join-select", payload);
 }
 
-
-// ============================================================================
-// INSERT ÚNICO
-// ============================================================================
+/* ====================================================
+   INSERT - INSERÇÕES
+==================================================== */
 
 /**
- * Insere um registro único
- * @param {number} project_id
- * @param {number} id_instancia
- * @param {string} table
- * @param {Array<{name: string, value: any}>} columns
- * @returns {Promise<Object>}
+ * INSERT único - Insere um registro
+ * 
+ * @param {number} project_id - ✅ OBRIGATÓRIO - ID do projeto
+ * @param {number} id_instancia - ✅ OBRIGATÓRIO - ID da instância
+ * @param {string} table - ✅ OBRIGATÓRIO - Nome da tabela
+ * @param {Object} data - ✅ OBRIGATÓRIO - Dados a inserir {coluna: valor}
+ * 
+ * @returns {Promise<{success: boolean, message: string, id: number}>}
+ * 
+ * @example
+ * await insert(1, 10, "usuarios", {
+ *   nome: "João Silva",
+ *   email: "joao@example.com",
+ *   idade: 25,
+ *   status: "ativo"
+ * });
+ * // Retorna: { success: true, message: "Registro inserido com sucesso", id: 789 }
  */
-async function insert(project_id, id_instancia, table, columns) {
+async function insert(project_id, id_instancia, table, data) {
+  if (!project_id) throw new Error("project_id é obrigatório");
+  if (!id_instancia) throw new Error("id_instancia é obrigatório");
+  if (!table) throw new Error("table é obrigatória");
+  if (!data || Object.keys(data).length === 0) {
+    throw new Error("data não pode ser vazio");
+  }
+
+  // Transforma {nome: "X", idade: 25} em [{name: "nome", value: "X"}, {name: "idade", value: 25}]
+  const columns = Object.entries(data).map(([key, value]) => ({
+    name: key,
+    value,
+  }));
+
   const payload = {
     project_id,
     id_instancia,
     table,
-    columns
+    columns,
   };
-  
+
   return requestToGo("/data/insert", payload);
 }
 
-// ============================================================================
-// BATCH INSERT
-// ============================================================================
-
 /**
- * Insere múltiplos registros
- * @param {number} project_id
- * @param {number} id_instancia
- * @param {string} table
- * @param {Array<Array<{name: string, value: any}>>} rows
- * @returns {Promise<Object>}
+ * BATCH INSERT - Insere múltiplos registros
+ * 
+ * @param {number} project_id - ✅ OBRIGATÓRIO - ID do projeto
+ * @param {number} id_instancia - ✅ OBRIGATÓRIO - ID da instância
+ * @param {string} table - ✅ OBRIGATÓRIO - Nome da tabela
+ * @param {Object[]} data - ✅ OBRIGATÓRIO - Array de objetos a inserir
+ * 
+ * @returns {Promise<{success: boolean, message: string, count: number}>}
+ * 
+ * @example
+ * await batchInsert(1, 10, "produtos", [
+ *   { nome: "Produto A", preco: 29.90, estoque: 100 },
+ *   { nome: "Produto B", preco: 49.90, estoque: 50 },
+ *   { nome: "Produto C", preco: 15.75, estoque: 200 }
+ * ]);
+ * // Retorna: { success: true, message: "Registros inseridos com sucesso", count: 3 }
  */
-async function batchInsert(project_id, id_instancia, table, rows) {
+async function batchInsert(project_id, id_instancia, table, data) {
+  if (!project_id) throw new Error("project_id é obrigatório");
+  if (!id_instancia) throw new Error("id_instancia é obrigatória");
+  if (!table) throw new Error("table é obrigatória");
+  if (!Array.isArray(data) || data.length === 0) {
+    throw new Error("data deve ser um array não vazio");
+  }
+
+  // Transforma cada objeto em array de {name, value}
+  const rows = data.map((row) =>
+    Object.entries(row).map(([key, value]) => ({
+      name: key,
+      value,
+    }))
+  );
+
   const payload = {
     project_id,
     id_instancia,
     table,
-    rows
+    rows,
   };
-  
+
   return requestToGo("/data/batch-insert", payload);
 }
-
-// ============================================================================
-// EXPORTS
-// ============================================================================
-
-
 
 /* ====================================================
    UPDATE - ATUALIZAÇÕES
 ==================================================== */
+
 /**
- * ====================================================
- * UPDATE - Atualizar um único registro
- * ====================================================
- *
- * Envia uma atualização para o CORE (Go) para um único registro,
- * baseado no projeto, instância e filtros definidos.
- *
- * Estrutura enviada ao Go:
- * {
- *   project_id: number,      // ID do projeto
- *   id_instancia: number,    // ID da instância
- *   table: string,           // Nome da tabela
- *   data: object,            // Dados a atualizar (ex: { status: "ativo" })
- *   where: object,           // Filtros WHERE (ex: { id: 5 })
- *   where_raw: string        // Filtro customizado, opcional
- * }
- *
- * Estrutura de retorno esperada:
- * {
- *   success: boolean,        // true se operação OK
- *   message: string,         // Mensagem de status
- *   count: number            // Quantidade de registros afetados (geralmente 1)
- * }
- *
- * @param {number} project_id - ID do projeto
- * @param {number} id_instancia - ID da instância
- * @param {string} table - Nome da tabela
- * @param {Object} data - Dados a atualizar
- * @param {Object} [where] - Filtros WHERE
- * @param {string} [where_raw] - WHERE customizado
- *
- * @example
- * update(1, 10, "usuarios", { status: "inativo" }, { id: 5 })
- *
+ * UPDATE único - Atualiza registros
+ * 
+ * @param {number} project_id - ✅ OBRIGATÓRIO - ID do projeto
+ * @param {number} id_instancia - ✅ OBRIGATÓRIO - ID da instância
+ * @param {string} table - ✅ OBRIGATÓRIO - Nome da tabela
+ * @param {Object} data - ✅ OBRIGATÓRIO - Dados a atualizar {coluna: valor}
+ * @param {Object} [where={}] - ❌ OPCIONAL - Filtros WHERE {coluna: valor}
+ * @param {string} [where_raw=null] - ❌ OPCIONAL - WHERE customizado
+ * 
  * @returns {Promise<{success: boolean, message: string, count: number}>}
+ * 
+ * @example
+ * // Atualizar por ID
+ * await update(1, 10, "usuarios", 
+ *   { status: "inativo", updated_at: new Date() },
+ *   { id: 5 }
+ * );
+ * 
+ * @example
+ * // Atualizar com WHERE customizado
+ * await update(1, 10, "usuarios",
+ *   { status: "inativo" },
+ *   {},
+ *   "idade > 65 AND ativo = true"
+ * );
+ * // Retorna: { success: true, message: "Atualização concluída", count: 3 }
  */
-async function update(project_id, id_instancia, table, data, where = {}, where_raw = null) {
+async function update(
+  project_id,
+  id_instancia,
+  table,
+  data,
+  where = {},
+  where_raw = null
+) {
   if (!project_id || !id_instancia || !table || !data) {
     throw new Error("project_id, id_instancia, table e data são obrigatórios");
   }
 
-  // 🔹 Estrutura predefinida
   const payload = {
     project_id,
     id_instancia,
@@ -339,51 +393,32 @@ async function update(project_id, id_instancia, table, data, where = {}, where_r
 }
 
 /**
- * ====================================================
- * BATCH UPDATE - Atualizar múltiplos registros
- * ====================================================
- *
- * Envia múltiplas atualizações para o CORE (Go) para registros distintos,
- * cada um com suas condições de atualização (dados e WHERE).
- *
- * Estrutura enviada ao Go:
- * {
- *   project_id: number,      // ID do projeto
- *   id_instancia: number,    // ID da instância
- *   table: string,           // Nome da tabela
- *   updates: array           // Array de objetos { data, where }
- * }
- *
- * Cada objeto de `updates` contém:
- * - `data`: os dados a serem atualizados
- * - `where`: os filtros WHERE para identificar os registros a atualizar
- *
- * Estrutura de retorno esperada:
- * {
- *   success: boolean,        // true se operação OK
- *   message: string,         // Mensagem de status
- *   count: number            // Quantidade de registros atualizados
- * }
- *
- * @param {number} project_id - ID do projeto
- * @param {number} id_instancia - ID da instância
- * @param {string} table - Nome da tabela
- * @param {Object[]} updates - Array de objetos { data, where }
- *
- * @example
- * batchUpdate(1, 10, "usuarios", [
- *   { data: { status: "ativo" }, where: { id: 1 } },
- *   { data: { status: "inativo" }, where: { id: 2 } }
- * ])
- *
+ * BATCH UPDATE - Atualiza múltiplos registros
+ * 
+ * @param {number} project_id - ✅ OBRIGATÓRIO - ID do projeto
+ * @param {number} id_instancia - ✅ OBRIGATÓRIO - ID da instância
+ * @param {string} table - ✅ OBRIGATÓRIO - Nome da tabela
+ * @param {Object[]} updates - ✅ OBRIGATÓRIO - Array de {data, where}
+ * @param {Object} updates[].data - Dados a atualizar
+ * @param {Object} updates[].where - Condições WHERE
+ * 
  * @returns {Promise<{success: boolean, message: string, count: number}>}
+ * 
+ * @example
+ * await batchUpdate(1, 10, "pedidos", [
+ *   { data: { status: "enviado" }, where: { id: 100 } },
+ *   { data: { status: "entregue" }, where: { id: 101 } },
+ *   { data: { status: "cancelado" }, where: { id: 102 } }
+ * ]);
+ * // Retorna: { success: true, message: "Atualizações concluídas", count: 3 }
  */
 async function batchUpdate(project_id, id_instancia, table, updates) {
   if (!project_id || !id_instancia || !table || !Array.isArray(updates)) {
-    throw new Error("project_id, id_instancia, table e updates (array) são obrigatórios");
+    throw new Error(
+      "project_id, id_instancia, table e updates (array) são obrigatórios"
+    );
   }
 
-  // 🔹 Estrutura predefinida
   const payload = {
     project_id,
     id_instancia,
@@ -394,55 +429,55 @@ async function batchUpdate(project_id, id_instancia, table, updates) {
   return requestToGo("/data/batch-update", payload);
 }
 
-
 /* ====================================================
    DELETE - REMOÇÕES
 ==================================================== */
+
 /**
- * ====================================================
- * DELETE - Remover registros (hard ou soft delete)
- * ====================================================
- *
- * Envia uma requisição para remover registros do banco de dados.
- * Você pode escolher entre realizar um **hard delete** (remoção definitiva)
- * ou um **soft delete** (marcar o registro como deletado com `deleted_at`).
- *
- * Estrutura enviada ao Go:
- * {
- *   project_id: number,      // ID do projeto
- *   id_instancia: number,    // ID da instância
- *   table: string,           // Nome da tabela
- *   where: object,           // Filtros WHERE (ex: { id: 5 })
- *   where_raw: string,       // Filtro raw customizado
- *   mode: string,            // "hard" ou "soft" (padrão: "hard")
- * }
- *
- * Estrutura de retorno esperada:
- * {
- *   success: boolean,        // true se operação OK
- *   message: string,         // Mensagem de status
- *   mode: string,            // "hard" ou "soft"
- *   count: number            // Quantidade de registros afetados
- * }
- *
- * @param {number} project_id - ID do projeto
- * @param {number} id_instancia - ID da instância
- * @param {string} table - Nome da tabela
- * @param {Object} [where] - Filtros WHERE
- * @param {string} [where_raw] - WHERE customizado
- * @param {string} [mode="hard"] - Modo de delete ("hard" ou "soft")
- *
+ * DELETE - Remove registros (hard ou soft)
+ * 
+ * @param {number} project_id - ✅ OBRIGATÓRIO - ID do projeto
+ * @param {number} id_instancia - ✅ OBRIGATÓRIO - ID da instância
+ * @param {string} table - ✅ OBRIGATÓRIO - Nome da tabela
+ * @param {Object} [where={}] - ❌ OPCIONAL - Filtros WHERE {coluna: valor}
+ * @param {string} [where_raw=null] - ❌ OPCIONAL - WHERE customizado
+ * @param {string} [mode="hard"] - ❌ OPCIONAL - Modo: "hard" ou "soft"
+ * 
+ * @returns {Promise<{success: boolean, message: string, mode: string, count: number}>}
+ * 
+ * Modos:
+ * - "hard": Remove fisicamente do banco (DELETE)
+ * - "soft": Marca como deletado (UPDATE deleted_at = NOW())
+ * 
  * @example
- * // Hard delete (remove do banco)
- * deleteRecords(1, 10, "logs", { id: 100 }, null, "hard")
- *
+ * // Hard delete (remoção física)
+ * await deleteRecords(1, 10, "logs", { id: 100 }, null, "hard");
+ * 
  * @example
  * // Soft delete (marca como deletado)
- * deleteRecords(1, 10, "usuarios", { email: "remover@example.com" }, null, "soft")
- *
- * @returns {Promise<{success: boolean, message: string, mode: string, count: number}>}
+ * await deleteRecords(1, 10, "usuarios", 
+ *   { email: "remover@example.com" }, 
+ *   null, 
+ *   "soft"
+ * );
+ * 
+ * @example
+ * // Delete com WHERE customizado
+ * await deleteRecords(1, 10, "logs", 
+ *   {}, 
+ *   "created_at < '2025-01-01'", 
+ *   "hard"
+ * );
+ * // Retorna: { success: true, message: "Delete concluído", mode: "hard", count: 5 }
  */
-async function deleteRecords(project_id, id_instancia, table, where = {}, where_raw = null, mode = "hard") {
+async function deleteRecords(
+  project_id,
+  id_instancia,
+  table,
+  where = {},
+  where_raw = null,
+  mode = "hard"
+) {
   if (!project_id || !id_instancia || !table) {
     throw new Error("project_id, id_instancia e table são obrigatórios");
   }
@@ -462,36 +497,64 @@ async function deleteRecords(project_id, id_instancia, table, where = {}, where_
 ==================================================== */
 
 /**
- * Aggregate - Operações de agregação
+ * AGGREGATE - Executa operações de agregação
  * 
- * @param {number} project_id - ID do projeto
- * @param {number} id_instancia - ID da instância
- * @param {string} table - Nome da tabela
- * @param {string} operation - COUNT, SUM, AVG, MIN, MAX, EXISTS
- * @param {string} [column] - Coluna (necessária para SUM, AVG, MIN, MAX)
- * @param {Object} [where] - Filtros WHERE
- * 
- * @example
- * // COUNT
- * aggregate(1, 10, "usuarios", "COUNT", null, { status: "ativo" })
- * 
- * @example
- * // SUM
- * aggregate(1, 10, "pedidos", "SUM", "total", { status: "pago" })
- * 
- * @example
- * // AVG
- * aggregate(1, 10, "avaliacoes", "AVG", "nota")
- * 
- * @example
- * // EXISTS
- * aggregate(1, 10, "usuarios", "EXISTS", null, { email: "verificar@example.com" })
+ * @param {number} project_id - ✅ OBRIGATÓRIO - ID do projeto
+ * @param {number} id_instancia - ✅ OBRIGATÓRIO - ID da instância
+ * @param {string} table - ✅ OBRIGATÓRIO - Nome da tabela
+ * @param {string} operation - ✅ OBRIGATÓRIO - COUNT, SUM, AVG, MIN, MAX, EXISTS
+ * @param {string} [column=null] - ❌ OPCIONAL - Coluna (obrigatória para SUM, AVG, MIN, MAX)
+ * @param {Object} [where={}] - ❌ OPCIONAL - Filtros WHERE
  * 
  * @returns {Promise<{success: boolean, result: number|boolean}>}
+ * 
+ * Operações:
+ * - COUNT: Conta registros (não precisa de column)
+ * - SUM: Soma valores (precisa de column)
+ * - AVG: Calcula média (precisa de column)
+ * - MIN: Retorna valor mínimo (precisa de column)
+ * - MAX: Retorna valor máximo (precisa de column)
+ * - EXISTS: Verifica se existe algum registro (não precisa de column)
+ * 
+ * @example
+ * // COUNT - Contar usuários ativos
+ * await aggregate(1, 10, "usuarios", "COUNT", null, { status: "ativo" });
+ * // Retorna: { success: true, result: 150 }
+ * 
+ * @example
+ * // SUM - Somar total de pedidos pagos
+ * await aggregate(1, 10, "pedidos", "SUM", "total", { status: "pago" });
+ * // Retorna: { success: true, result: 15420.50 }
+ * 
+ * @example
+ * // AVG - Média de avaliações
+ * await aggregate(1, 10, "avaliacoes", "AVG", "nota");
+ * // Retorna: { success: true, result: 4.5 }
+ * 
+ * @example
+ * // MIN/MAX - Menor e maior preço
+ * await aggregate(1, 10, "produtos", "MIN", "preco");
+ * await aggregate(1, 10, "produtos", "MAX", "preco");
+ * 
+ * @example
+ * // EXISTS - Verificar se email existe
+ * await aggregate(1, 10, "usuarios", "EXISTS", null, 
+ *   { email: "verificar@example.com" }
+ * );
+ * // Retorna: { success: true, result: true }
  */
-async function aggregate(project_id, id_instancia, table, operation, column = null, where = {}) {
+async function aggregate(
+  project_id,
+  id_instancia,
+  table,
+  operation,
+  column = null,
+  where = {}
+) {
   if (!project_id || !id_instancia || !table || !operation) {
-    throw new Error("project_id, id_instancia, table e operation são obrigatórios");
+    throw new Error(
+      "project_id, id_instancia, table e operation são obrigatórios"
+    );
   }
 
   return requestToGo("/data/aggregate", {
@@ -504,8 +567,6 @@ async function aggregate(project_id, id_instancia, table, operation, column = nu
   });
 }
 
-
-      
 /* ====================================================
    EXPORTS
 ==================================================== */
@@ -514,25 +575,18 @@ export default {
   // SELECT
   advancedSelect,
   joinSelect,
-  
+
   // INSERT
   insert,
   batchInsert,
-  
+
   // UPDATE
   update,
   batchUpdate,
-  
+
   // DELETE
   delete: deleteRecords,
-  
+
   // AGGREGATE
   aggregate,
-
 };
-
-
-
-
-
-
