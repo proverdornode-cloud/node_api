@@ -6,157 +6,142 @@
 
 import goDataEngineService from "../../services/goDataEngine.service.js";
 
+/**
+ * Função auxiliar para tratar erros de forma consistente
+ */
+function handleError(res, context, err) {
+  console.error(`❌ Erro no ${context}:`, err.message);
+  return res.status(500).json({
+    success: false,
+    message: `Erro ao ${context}`,
+    error: err.message,
+  });
+}
+
+/**
+ * Função auxiliar para validação de campos obrigatórios
+ */
+function validateFields(res, body, requiredFields, context) {
+  const missing = requiredFields.filter((f) => !(f in body) || body[f] == null);
+  if (missing.length) {
+    return res.status(400).json({
+      success: false,
+      message: `Campos obrigatórios ausentes para ${context}: ${missing.join(", ")}`,
+    });
+  }
+  return null;
+}
+
 /* ----------------------
    CRUD / OPERAÇÕES
 ---------------------- */
 
-/**
- * Controller - INSERT único
- */
+// INSERT único
 export async function insertRecord(req, res) {
+  const validationError = validateFields(req, req.body, ["project_id", "id_instancia", "table", "data"], "insert");
+  if (validationError) return validationError;
+
   try {
-    const { project_id, id_instancia, table, columns } = req.body;
-    
-    if (!project_id || !id_instancia || !table || !columns) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Campos obrigatórios: project_id, id_instancia, table, columns" 
-      });
-    }
-    
-    const result = await goDataEngineService.insert(project_id, id_instancia, table, columns);
-    
-    res.json({ 
-      success: true, 
-      message: "Registro inserido com sucesso", 
-      data: result 
-    });
-    
+    const { project_id, id_instancia, table, data } = req.body;
+    const result = await goDataEngineService.insert(project_id, id_instancia, table, data);
+    res.json({ success: true, message: "Registro inserido com sucesso", data: result });
   } catch (err) {
-    console.error("❌ Erro no insert:", err.message);
-    res.status(500).json({ 
-      success: false, 
-      message: "Erro ao inserir registro", 
-      error: err.message 
-    });
+    handleError(res, "inserir registro", err);
   }
 }
 
-/**
- * Controller - BATCH INSERT
- */
+// BATCH INSERT
 export async function batchInsert(req, res) {
+  const validationError = validateFields(req, req.body, ["project_id", "id_instancia", "table", "data"], "batch insert");
+  if (validationError) return validationError;
+
+  if (!Array.isArray(req.body.data)) {
+    return res.status(400).json({ success: false, message: "data deve ser um array para batch insert" });
+  }
+
   try {
-    const { project_id, id_instancia, table, rows } = req.body;
-    
-    if (!project_id || !id_instancia || !table || !rows) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Campos obrigatórios: project_id, id_instancia, table, rows" 
-      });
-    }
-    
-    if (!Array.isArray(rows)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "rows deve ser um array" 
-      });
-    }
-    
-    const result = await goDataEngineService.batchInsert(project_id, id_instancia, table, rows);
-    
-    res.json({ 
-      success: true, 
-      message: "Registros inseridos em lote com sucesso", 
-      data: result 
-    });
-    
+    const { project_id, id_instancia, table, data } = req.body;
+    const result = await goDataEngineService.batchInsert(project_id, id_instancia, table, data);
+    res.json({ success: true, message: "Batch insert realizado com sucesso", data: result });
   } catch (err) {
-    console.error("❌ Erro no batchInsert:", err.message);
-    res.status(500).json({ 
-      success: false, 
-      message: "Erro ao inserir registros em lote", 
-      error: err.message 
-    });
+    handleError(res, "inserir registros em lote", err);
   }
 }
 
-
-// GET / Advanced Select
+// ADVANCED SELECT
 export async function advancedSelect(req, res) {
-  try {
-    const options = req.body;
-    if (!options.project_id || !options.id_instancia || !options.table)
-      return res.status(400).json({ success: false, message: "project_id, id_instancia e table são obrigatórios" });
+  const validationError = validateFields(req, req.body, ["project_id", "id_instancia", "table"], "consulta avançada");
+  if (validationError) return validationError;
 
-    const result = await goDataEngineService.advancedSelect(options);
-    res.json({ success: true, message: "Consulta realizada com sucesso", data: result, count: Array.isArray(result) ? result.length : 0 });
+  try {
+    const result = await goDataEngineService.advancedSelect(req.body);
+    res.json({
+      success: true,
+      message: "Consulta realizada com sucesso",
+      data: result,
+      count: Array.isArray(result.data) ? result.data.length : 0,
+    });
   } catch (err) {
-    console.error("❌ Erro no advancedSelect:", err.message);
-    res.status(500).json({ success: false, message: "Erro ao executar consulta avançada", error: err.message });
+    handleError(res, "executar consulta avançada", err);
   }
 }
 
 // UPDATE
 export async function updateRecord(req, res) {
+  const validationError = validateFields(req, req.body, ["project_id", "id_instancia", "table", "data"], "update");
+  if (validationError) return validationError;
+
   try {
     const { project_id, id_instancia, table, data, where, where_raw } = req.body;
-    if (!project_id || !id_instancia || !table || !data)
-      return res.status(400).json({ success: false, message: "project_id, id_instancia, table e data são obrigatórios" });
-
     const result = await goDataEngineService.update(project_id, id_instancia, table, data, where || {}, where_raw || null);
     res.json({ success: true, message: "Registro atualizado com sucesso", data: result });
   } catch (err) {
-    console.error("❌ Erro no update:", err.message);
-    res.status(500).json({ success: false, message: "Erro ao atualizar registro", error: err.message });
+    handleError(res, "atualizar registro", err);
   }
 }
 
-// Batch Update
+// BATCH UPDATE
 export async function batchUpdate(req, res) {
+  const validationError = validateFields(req, req.body, ["project_id", "id_instancia", "table", "updates"], "batch update");
+  if (validationError) return validationError;
+
+  if (!Array.isArray(req.body.updates)) {
+    return res.status(400).json({ success: false, message: "updates deve ser um array para batch update" });
+  }
+
   try {
     const { project_id, id_instancia, table, updates } = req.body;
-    if (!project_id || !id_instancia || !table || !Array.isArray(updates))
-      return res.status(400).json({ success: false, message: "project_id, id_instancia, table e updates (array) são obrigatórios" });
-
     const result = await goDataEngineService.batchUpdate(project_id, id_instancia, table, updates);
     res.json({ success: true, message: "Batch update realizado com sucesso", data: result });
   } catch (err) {
-    console.error("❌ Erro no batchUpdate:", err.message);
-    res.status(500).json({ success: false, message: "Erro ao atualizar registros em lote", error: err.message });
+    handleError(res, "atualizar registros em lote", err);
   }
 }
 
 // DELETE
 export async function deleteRecord(req, res) {
+  const validationError = validateFields(req, req.body, ["project_id", "id_instancia", "table"], "delete");
+  if (validationError) return validationError;
+
   try {
     const { project_id, id_instancia, table, where, where_raw, mode } = req.body;
-    if (!project_id || !id_instancia || !table)
-      return res.status(400).json({ success: false, message: "project_id, id_instancia e table são obrigatórios" });
-
     const result = await goDataEngineService.delete(project_id, id_instancia, table, where || {}, where_raw || null, mode || "hard");
     res.json({ success: true, message: "Registro(s) deletado(s) com sucesso", data: result });
   } catch (err) {
-    console.error("❌ Erro no delete:", err.message);
-    res.status(500).json({ success: false, message: "Erro ao deletar registro(s)", error: err.message });
+    handleError(res, "deletar registro(s)", err);
   }
 }
 
 // AGGREGATE
 export async function aggregate(req, res) {
+  const validationError = validateFields(req, req.body, ["project_id", "id_instancia", "table", "operation"], "aggregate");
+  if (validationError) return validationError;
+
   try {
     const { project_id, id_instancia, table, operation, column, where } = req.body;
-    if (!project_id || !id_instancia || !table || !operation)
-      return res.status(400).json({ success: false, message: "project_id, id_instancia, table e operation são obrigatórios" });
-
     const result = await goDataEngineService.aggregate(project_id, id_instancia, table, operation, column || null, where || {});
     res.json({ success: true, message: "Agregação realizada com sucesso", data: result });
   } catch (err) {
-    console.error("❌ Erro no aggregate:", err.message);
-    res.status(500).json({ success: false, message: "Erro ao executar agregação", error: err.message });
+    handleError(res, "executar agregação", err);
   }
 }
-
-
-
-
