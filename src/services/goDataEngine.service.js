@@ -313,13 +313,6 @@ async function batchInsert(project_id, instance_id, table, data) {
   return requestToGo("/data/batch-insert", payload);
 }
 
-// ✅ Não esqueça de EXPORTAR as funções no final do arquivo!
-export default {
-  insert,
-  batchInsert,
-  // ... suas outras funções (select, update, delete, etc)
-};
-
 /* ====================================================
    UPDATE - ATUALIZAÇÕES
 ==================================================== */
@@ -574,3 +567,4 @@ export default {
   // AGGREGATE
   aggregate,
 };
+
