@@ -250,27 +250,15 @@ async function joinSelect(options) {
 ==================================================== */
 
 /**
- * INSERT único - Insere um registro
- * 
- * @param {number} project_id - ✅ OBRIGATÓRIO - ID do projeto
- * @param {number} id_instancia - ✅ OBRIGATÓRIO - ID da instância
- * @param {string} table - ✅ OBRIGATÓRIO - Nome da tabela
- * @param {Object} data - ✅ OBRIGATÓRIO - Dados a inserir {coluna: valor}
- * 
- * @returns {Promise<{success: boolean, message: string, id: number}>}
- * 
- * @example
- * await insert(1, 10, "usuarios", {
- *   nome: "João Silva",
- *   email: "joao@example.com",
- *   idade: 25,
- *   status: "ativo"
- * });
- * // Retorna: { success: true, message: "Registro inserido com sucesso", id: 789 }
+ * INSERT único
+ * @param {number} project_id - ID do projeto
+ * @param {number} instance_id - ID da instância (CORRIGIDO)
+ * @param {string} table - Nome da tabela
+ * @param {object} data - Dados a inserir {coluna: valor}
  */
-async function insert(project_id, id_instancia, table, data) {
+async function insert(project_id, instance_id, table, data) {
   if (!project_id) throw new Error("project_id é obrigatório");
-  if (!id_instancia) throw new Error("id_instancia é obrigatório");
+  if (!instance_id) throw new Error("instance_id é obrigatório");
   if (!table) throw new Error("table é obrigatória");
   if (!data || Object.keys(data).length === 0) {
     throw new Error("data não pode ser vazio");
@@ -284,7 +272,7 @@ async function insert(project_id, id_instancia, table, data) {
 
   const payload = {
     project_id,
-    id_instancia,
+    instance_id,  // ✅ CORRIGIDO - antes era id_instancia
     table,
     columns,
   };
@@ -293,26 +281,15 @@ async function insert(project_id, id_instancia, table, data) {
 }
 
 /**
- * BATCH INSERT - Insere múltiplos registros
- * 
- * @param {number} project_id - ✅ OBRIGATÓRIO - ID do projeto
- * @param {number} id_instancia - ✅ OBRIGATÓRIO - ID da instância
- * @param {string} table - ✅ OBRIGATÓRIO - Nome da tabela
- * @param {Object[]} data - ✅ OBRIGATÓRIO - Array de objetos a inserir
- * 
- * @returns {Promise<{success: boolean, message: string, count: number}>}
- * 
- * @example
- * await batchInsert(1, 10, "produtos", [
- *   { nome: "Produto A", preco: 29.90, estoque: 100 },
- *   { nome: "Produto B", preco: 49.90, estoque: 50 },
- *   { nome: "Produto C", preco: 15.75, estoque: 200 }
- * ]);
- * // Retorna: { success: true, message: "Registros inseridos com sucesso", count: 3 }
+ * BATCH INSERT - Insere múltiplos registros de uma vez
+ * @param {number} project_id - ID do projeto
+ * @param {number} instance_id - ID da instância (CORRIGIDO)
+ * @param {string} table - Nome da tabela
+ * @param {array} data - Array de objetos a inserir
  */
-async function batchInsert(project_id, id_instancia, table, data) {
+async function batchInsert(project_id, instance_id, table, data) {
   if (!project_id) throw new Error("project_id é obrigatório");
-  if (!id_instancia) throw new Error("id_instancia é obrigatória");
+  if (!instance_id) throw new Error("instance_id é obrigatória");
   if (!table) throw new Error("table é obrigatória");
   if (!Array.isArray(data) || data.length === 0) {
     throw new Error("data deve ser um array não vazio");
@@ -328,13 +305,20 @@ async function batchInsert(project_id, id_instancia, table, data) {
 
   const payload = {
     project_id,
-    id_instancia,
+    instance_id,  // ✅ CORRIGIDO - antes era id_instancia
     table,
     rows,
   };
 
   return requestToGo("/data/batch-insert", payload);
 }
+
+// ✅ Não esqueça de EXPORTAR as funções no final do arquivo!
+export default {
+  insert,
+  batchInsert,
+  // ... suas outras funções (select, update, delete, etc)
+};
 
 /* ====================================================
    UPDATE - ATUALIZAÇÕES
