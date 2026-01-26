@@ -6,7 +6,6 @@ const router = express.Router();
 
 // CRUD / Data Engine   
 router.post("/insert", validateApiKey, controller.insertRecord);
-router.post("/insertDebug", validateApiKey, controller.insertRecordDebug);
 router.post("/batch-insert", validateApiKey, controller.batchInsert);
 router.post("/get", validateApiKey, controller.advancedSelect);
 router.post("/update", validateApiKey, controller.updateRecord);
@@ -15,4 +14,5 @@ router.post("/delete", validateApiKey, controller.deleteRecord);
 router.post("/aggregate", validateApiKey, controller.aggregate);
 
 export default router;
+
 
