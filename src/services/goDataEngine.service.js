@@ -271,8 +271,8 @@ async function insert(project_id, instance_id, table, data) {
   }));
 
   const payload = {
-    project_id,
-    instance_id,  // ✅ CORRIGIDO - antes era id_instancia
+    project_id: Number(project_id),
+    id_instancia: Number(instance_id),
     table,
     columns,
   };
@@ -304,8 +304,8 @@ async function batchInsert(project_id, instance_id, table, data) {
   );
 
   const payload = {
-    project_id,
-    instance_id,  // ✅ CORRIGIDO - antes era id_instancia
+    project_id: Number(project_id),
+    id_instancia: Number(instance_id),
     table,
     rows,
   };
@@ -567,4 +567,5 @@ export default {
   // AGGREGATE
   aggregate,
 };
+
 
