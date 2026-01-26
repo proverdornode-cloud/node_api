@@ -271,8 +271,8 @@ async function insert(project_id, instance_id, table, data) {
   }));
 
   const payload = {
-    project_id: Number(project_id),
-    id_instancia: Number(instance_id),
+    project_id,
+    id_instancia: instance_id,
     table,
     columns,
   };
@@ -304,14 +304,17 @@ async function batchInsert(project_id, instance_id, table, data) {
   );
 
   const payload = {
-    project_id: Number(project_id),
-    id_instancia: Number(instance_id),
+    project_id,
+    id_instancia: instance_id,
     table,
     rows,
   };
 
   return requestToGo("/data/batch-insert", payload);
 }
+
+// ✅ Não esqueça de EXPORTAR as funções no final do arquivo!
+
 
 /* ====================================================
    UPDATE - ATUALIZAÇÕES
@@ -567,5 +570,3 @@ export default {
   // AGGREGATE
   aggregate,
 };
-
-
